@@ -17,7 +17,7 @@ Traffic (live or .pcap) -> Scapy -> feature extraction -> ML model + rules -> ri
 
 ---
 
-## 1. Install Docker
+## 1. Install Docker 
 
 Docker lets us all run the exact same environment with one command, so nobody has to install Python versions, databases, or libraries by hand.
 
@@ -101,13 +101,13 @@ After changing code or a Dockerfile, rebuild that service with `docker compose u
 We use [uv](https://docs.astral.sh/uv/), a fast replacement for pip + venv. Install it from https://docs.astral.sh/uv/getting-started/installation/ then:
 
 ```bash
-cd ml                      # or backend, or detection
+cd machine_learning        # or backend, or detection
 uv sync                    # creates the virtual environment and installs dependencies
 uv run python train.py     # run something inside that environment
 uv add pandas              # add a dependency (updates pyproject.toml + uv.lock)
 ```
 
-Prefer plain pip? Run `uv export > requirements.txt` and use that instead.
+If you prefer using pip: Run `uv export > requirements.txt` and use that instead! :)
 Commit `pyproject.toml` and `uv.lock` whenever dependencies change.
 
 ---
@@ -117,26 +117,60 @@ Commit `pyproject.toml` and `uv.lock` whenever dependencies change.
 | Role | Works in | What it covers |
 |------|----------|----------------|
 | **Machine Learning** | `machine_learning/` and `detection/` | Training, experiments, and notebooks live in `machine_learning/`. The model's feature extraction and prediction code live in `detection/src/` (`features.py`, `predict.py`). |
-| **Network Security / Detection** | `detection/` | Packet capture, flow building, device tracking, rule-based detections (port scan, unauthorized device, repeated logins), and risk levels. |
+| **Cyber Security / Detection** | `detection/` | Packet capture, flow building, device tracking, rule-based detections (port scan, unauthorized device, repeated logins), and risk levels. |
 | **Backend** | `backend/` | FastAPI endpoints that serve alerts, devices, and stats to the dashboard. |
 | **LLM / AI** | `backend/app/llm/` | Alert explanations and the chat assistant (calls an LLM API from the backend). |
 | **Frontend** | `frontend/` | Dashboard pages, charts, and the chat panel. |
 | **Database / DevOps / Docs** | `db/`, `docker-compose.yml`, `docs/` | Schema, Docker setup, README, diagrams, and report material. |
 
 ```
-nids-capstone/
-├── docker-compose.yml     # starts all services
-├── .env
-├── detection/             # capture -> features -> model -> rules -> alerts
+NIDS_Capstone/
+│
+├── docker-compose.yml          # Starts every service with one command
+├── .env.example                # Template for local settings (copy to .env)
+├── .gitignore                  # Keeps .env, datasets, and models out of Git
+├── README.md                   # You are here
+│
+├── detection/                  # [container] Traffic in -> alerts out
+│   ├── Dockerfile
+│   ├── pyproject.toml
 │   └── src/
-├── machine_learning/                    # training, notebooks, saved models (not a running service)
-├── backend/               # FastAPI + LLM assistant
+│       ├── main.py             #   Entry point, runs the pipeline loop
+│       ├── capture.py          #   Packets in: live sniffing or .pcap replay
+│       ├── flows.py            #   Groups packets into connections
+│       ├── features.py         #   Flow -> numeric features (shared with training)
+│       ├── devices.py          #   Tracks devices seen, flags unknown ones
+│       ├── predict.py          #   Loads the model, classifies traffic
+│       ├── rules/              #   Cyber Security part: port scan, repeated logins, unknown device
+│       ├── risk.py             #   Assigns low / medium / high / critical
+│       ├── alerts.py           #   Merges ML + rules, removes duplicates
+│       └── db.py               #   Saves results to PostgreSQL
+│
+├── machine_learning/           # Offline work, not a running service
+│   ├── pyproject.toml
+│   ├── notebooks/              #   Data exploration and experiments
+│   ├── train.py                #   Trains the model, saves model.joblib
+│   ├── evaluate.py             #   Accuracy, precision/recall, confusion matrix
+│   └── models/                 #   Saved models (gitignored, shared via Releases)
+│
+├── backend/                    # [container] FastAPI: serves data + AI assistant
+│   ├── Dockerfile
+│   ├── pyproject.toml
 │   └── app/
-│       └── llm/
-├── frontend/              # dashboard
-├── db/                    # init.sql (schema)
-├── data/                  # datasets and pcaps (gitignored)
-└── docs/                  # diagrams, risk methodology, report material
+│       ├── main.py             #   App startup
+│       ├── routes/             #   alerts.py, devices.py, connections.py, assistant.py
+│       ├── llm/                #   client.py, prompts.py, tools.py (LLM explanations + chat)
+│       └── db.py               #   Database connection
+│
+├── frontend/                   # [container] Dashboard
+│   ├── Dockerfile
+│   ├── package.json
+│   └── src/
+│       ├── pages/              #   Overview, Devices, Connections, Alerts
+│       └── components/         #   Charts, alert table, chat panel
+│
+└── database/                   #   (planned)
+    └── init.sql                #   Tables: devices, flows, alerts
 ```
 
 Important: `detection/src/features.py` is shared by training and live detection. If you change how features are computed, the model must be retrained, otherwise accuracy will collapse.
