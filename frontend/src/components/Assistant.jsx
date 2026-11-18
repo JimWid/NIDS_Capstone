@@ -1,0 +1,14 @@
+import {useEffect,useRef,useState} from 'react';
+import {Send,MessageSquare,Info} from 'lucide-react';
+import Modal from './Modal';
+import {useProject} from './ProjectProvider';
+export default function Assistant({alert,onClose}){
+ const {mode}=useProject();const [message,setMessage]=useState(alert?`Explain alert ${alert.id}: ${alert.title}`:''),[messages,setMessages]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState('');const controller=useRef(null);const bottom=useRef(null);
+ useEffect(()=>()=>controller.current?.abort(),[]);
+ useEffect(()=>{bottom.current?.scrollIntoView({block:'nearest'})},[messages,busy]);
+ async function send(e){e.preventDefault();const text=message.trim();if(!text||busy)return;setBusy(true);setError('');const ctrl=new AbortController();controller.current=ctrl;
+ try{const r=await fetch('/api/nids/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,...(alert?{alert_id:alert.id}:{})}),signal:ctrl.signal});const result=await r.json();if(!r.ok)throw new Error(result.error||'The assistant is unavailable.');setMessages(old=>[...old,{role:'You',text},{role:result.mode==='demo'?'Demo assistant':'AI assistant',text:result.data.reply}]);setMessage('')}
+ catch(e){if(e.name!=='AbortError')setError(e.message)}finally{if(!ctrl.signal.aborted)setBusy(false)}
+ }
+ return <Modal title="Network assistant" onClose={onClose}><div className="assistant-note"><Info size={16}/><span>{mode==='demo'?'Scripted examples only. No LLM is connected in demo mode.':'Answers come from the backend assistant. Verify suggestions against network evidence.'}</span></div>{alert&&<div className="context-tag">Context: {alert.id} · {alert.title}</div>}<div className="messages">{!messages.length&&<div className="assistant-empty"><MessageSquare size={30}/><h3>Make sense of an alert.</h3><p>Ask what a finding means or what to investigate next.</p><div className="suggestions">{['What is a port scan?','What does an unknown device mean?'].map(q=><button key={q} onClick={()=>setMessage(q)}>{q}</button>)}</div></div>}{messages.map((m,i)=><div className={'message '+(m.role==='You'?'user':'')} key={i}><b>{m.role}</b><p>{m.text}</p></div>)}{busy&&<p role="status" className="subtle">Waiting for a response…</p>}<div ref={bottom}/></div>{error&&<p role="alert" className="inline-error">{error} Your question is kept below; try again.</p>}<form className="chat-form" onSubmit={send}><label className="sr-only" htmlFor="question">Your question</label><textarea id="question" value={message} onChange={e=>setMessage(e.target.value)} placeholder="Ask about your network…" maxLength={2000} rows={2} required/><button className="button primary" disabled={busy||!message.trim()} type="submit"><Send size={17}/>Send</button></form><p className="chat-foot">Conversation stays in this panel and clears when you close it.</p></Modal>
+}

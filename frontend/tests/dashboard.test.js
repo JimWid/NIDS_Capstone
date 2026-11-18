@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {makeDemo,demoReply} from '../src/lib/demo.js';
+import {validatePayload,validateMessage} from '../src/lib/contract.js';
+import {fetchBackend} from '../src/lib/backend.js';
+import {filterRows,toCsv} from '../src/lib/view.js';
+import handler from '../src/pages/api/nids/[resource].js';
+
+test('demo fixtures meet the documented API contract',()=>{for(const [key,value] of Object.entries(makeDemo()))assert.doesNotThrow(()=>validatePayload(key,value))});
+test('search and severity filters combine, case-insensitively',()=>{const rows=makeDemo().alerts;assert.equal(filterRows(rows,'PORT SCAN','severity','high').length,2);assert.equal(filterRows(rows,'not present','severity','all').length,1);assert.equal(filterRows(rows,'nonexistent','severity','all').length,0)});
+test('CSV quotes commas and protects spreadsheet formula cells',()=>{const csv=toCsv([{a:'=SUM(A1)',b:'two, "quotes"'}],[{key:'a',label:'A'},{key:'b',label:'B'}]);assert.equal(csv,'"A","B"\r\n"\'=SUM(A1)","two, ""quotes"""')});
+test('contract rejects malformed API data instead of fabricating values',()=>{assert.throws(()=>validatePayload('alerts',[{title:'missing fields'}]));assert.throws(()=>validatePayload('stats',{packets:'10'}));assert.doesNotThrow(()=>validatePayload('devices',[]))});
+test('assistant validates messages and labels demo explanations',()=>{assert.equal(validateMessage({message:'   '}),false);assert.equal(validateMessage({message:'x'.repeat(2001)}),false);assert.equal(validateMessage({message:'Explain',alert_id:'ALT-001'}),true);assert.match(demoReply('explain','ALT-001'),/scripted demo/)});
+test('API adapter uses the configured backend endpoint',async()=>{let called;const rows=makeDemo().devices;const data=await fetchBackend('devices',{baseUrl:'http://backend:8000',fetchImpl:async(url,options)=>{called={url,options};return Response.json(rows)}});assert.deepEqual(data,rows);assert.equal(called.url,'http://backend:8000/devices');assert.equal(called.options.method,'GET')});
+test('assistant is forwarded as JSON, including alert context',async()=>{let body;await fetchBackend('assistant',{baseUrl:'http://localhost:8000',message:{message:'Explain',alert_id:'ALT-001'},fetchImpl:async(url,options)=>{body=JSON.parse(options.body);assert.equal(options.method,'POST');return Response.json({reply:'Check logs.'})}});assert.equal(body.alert_id,'ALT-001')});
+test('API errors stay errors; there is no fallback to demo',async()=>{await assert.rejects(fetchBackend('alerts',{fetchImpl:async()=>{throw Error('offline')}}),/unavailable/);await assert.rejects(fetchBackend('alerts',{fetchImpl:async()=>new Response('',{status:503})}),/503/);await assert.rejects(fetchBackend('alerts',{fetchImpl:async()=>Response.json({wrong:true})}),/Unexpected/)});
+async function call(req){const result={headers:{},code:200};const res={setHeader(k,v){result.headers[k]=v},status(code){result.code=code;return this},json(body){result.body=body;return this}};await handler(req,res);return result}
+test('API routes reject unsupported methods and resources',async()=>{assert.equal((await call({query:{resource:'secrets'},method:'GET'})).code,404);const r=await call({query:{resource:'alerts'},method:'POST'});assert.equal(r.code,405);assert.equal(r.headers.Allow,'GET');assert.equal((await call({query:{resource:'assistant'},method:'POST',body:{message:''}})).code,400)});
+test('default demo route labels its data and prevents caching',async()=>{const old=process.env.NIDS_DATA_MODE;delete process.env.NIDS_DATA_MODE;try{const r=await call({query:{resource:'devices'},method:'GET'});assert.equal(r.body.mode,'demo');assert.equal(r.body.data.length,6);assert.equal(r.headers['Cache-Control'],'no-store')}finally{if(old===undefined)delete process.env.NIDS_DATA_MODE;else process.env.NIDS_DATA_MODE=old}});
+test('demo traffic totals match interval and protocol totals',()=>{const {stats}=makeDemo();assert.equal(stats.traffic.reduce((n,p)=>n+p.packets,0),stats.packets);assert.equal(stats.protocols.reduce((n,p)=>n+p.packets,0),stats.packets)});

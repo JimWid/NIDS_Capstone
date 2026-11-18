@@ -1,0 +1,8 @@
+# Run from frontend: docker compose -f compose.demo.yml up --build
+services:
+  dashboard:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      NIDS_DATA_MODE: demo
